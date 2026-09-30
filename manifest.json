@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "launcher": 1,
+  "version": "0.3.0",
+  "ref": "ab50a8497e295141684c87d4cb3766e13e541131",
+  "path": "releases/WalletCounter-0.3.0.js",
+  "sha256": "ab4ac34a3e7c86e76c796371dd00bd9fd73833b2848a4c0169a667be0abfd845",
+  "notes": "Local spending counter, free SEK exchange-rate estimates, manual update checks and program rollback."
+}
