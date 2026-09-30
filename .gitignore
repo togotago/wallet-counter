@@ -1,0 +1,11 @@
+# Never commit device records, credentials or temporary exports.
+.env
+.env.*
+*token*
+*secret*
+WalletCounter-export-*.json
+settings.json
+fx-cache.json
+last-capture-test.json
+events/
+*.tmp
