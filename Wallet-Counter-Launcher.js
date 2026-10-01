@@ -1,4 +1,4 @@
-// Wallet Counter launcher v1.0.0. Paste once into the existing Wallet Counter script.
+// Wallet Counter launcher v1.0.1. Paste once into the existing Wallet Counter script.
 // Program updates come only from this repository. Purchase data stays local.
 const REPOSITORY = 'togotago/wallet-counter';
 const CHANNEL = 'main';
@@ -7,6 +7,7 @@ const MANIFEST_URL = RAW_ROOT + CHANNEL + '/manifest.json';
 const ufm = FileManager.local();
 const updateRoot = ufm.joinPath(ufm.libraryDirectory(), 'WalletCounter-updater-v1');
 const pointerPath = ufm.joinPath(updateRoot, 'active.json');
+const pointerBackupPath = pointerPath + '.backup';
 
 // SHA-256 over UTF-8. Checks download completeness and local code integrity.
 // This is not a signature: the repository owner is the trusted publisher.
@@ -64,17 +65,27 @@ function validateManifest(m) {
 }
 function codePath(d) { return ufm.joinPath(updateRoot, 'WalletCounter-'+d.version+'-'+d.sha256+'.js'); }
 function readPointer() {
-  if(!ufm.fileExists(pointerPath)) return null;
-  const p=JSON.parse(ufm.readString(pointerPath));
-  if(p.schema!==1) throw Error('Update settings are invalid.');
-  return {schema:1,active:validateDescriptor(p.active),previous:p.previous ? validateDescriptor(p.previous) : null};
+  for(const path of [pointerPath,pointerBackupPath]) {
+    if(!ufm.fileExists(path)) continue;
+    try {
+      const p=JSON.parse(ufm.readString(path));
+      if(p.schema!==1) throw Error('Update settings are invalid.');
+      return {schema:1,active:validateDescriptor(p.active),previous:p.previous ? validateDescriptor(p.previous) : null};
+    } catch(e) { if(path===pointerBackupPath || !ufm.fileExists(pointerBackupPath)) throw e; }
+  }
+  return null;
 }
 function writePointer(p) {
   ufm.createDirectory(updateRoot,true);
-  const tmp=pointerPath+'.'+UUID.string()+'.tmp';
-  ufm.writeString(tmp,JSON.stringify(p));
+  const previous=readPointer();
+  if(previous) ufm.writeString(pointerBackupPath,JSON.stringify(previous));
   // Commit only after the complete release file is saved and checked.
-  ufm.move(tmp,pointerPath);
+  // writeString explicitly supports replacement; move does not on some devices.
+  try { ufm.writeString(pointerPath,JSON.stringify(p)); }
+  catch(e) {
+    if(previous) try { ufm.writeString(pointerPath,JSON.stringify(previous)); } catch(_) {}
+    throw e; // readPointer can recover the backup if a write was interrupted.
+  }
 }
 function loadRelease(d) {
   const path=codePath(d);
@@ -99,7 +110,7 @@ async function installRelease(m,p) {
   new Function('module','exports',text);
   const d=validateDescriptor(m),path=codePath(d);
   ufm.createDirectory(updateRoot,true);
-  const temp=path+'.'+UUID.string()+'.tmp';ufm.writeString(temp,text);ufm.move(temp,path);
+  ufm.writeString(path,text); // Also permits retrying an already downloaded release.
   loadRelease(d); // Validate the contract before switching the active pointer.
   writePointer({schema:1,active:d,previous:p ? p.active : null});
 }
