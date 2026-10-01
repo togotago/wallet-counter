@@ -6,7 +6,7 @@ Apple Wallet → personal Shortcuts automation → Scriptable → local purchase
 
 ## Install once
 
-The current release is v0.3.0. The published manifest selects the tested release at an immutable commit.
+The current release is v0.3.1. The published manifest selects the tested release at an immutable commit.
 
 1. Keep a copy of your existing Wallet Counter script. You can also use Export backup for a readable record of your spending; automatic data import is not implemented.
 2. Replace the contents of the existing **Wallet Counter** Scriptable script with `Wallet-Counter-Launcher.js`. Keep the same script name.
@@ -24,6 +24,12 @@ The checksum detects incomplete or altered files. It is not a publisher signatur
 All purchases, merchant names, allowance settings and history stay in local Scriptable storage. Code hosting receives update requests, including normal network metadata such as the device's IP address. The exchange-rate service receives a public SEK rate request, not merchant names or purchase amounts.
 
 A private repository would need separate authenticated downloads and a narrowly scoped read-only token stored in Scriptable Keychain. This launcher deliberately uses public hosting and contains no token.
+
+## Transit taps with no fare yet
+
+Some transit systems calculate and charge fares later. v0.3.1 saves a Wallet tap whose amount is zero as a pending entry with no SEK deduction. The widget flags it for review. Open Recent purchases / corrections to enter the actual charge, or undo transfer taps that did not create separate charges. There is no automatic bank reconciliation or fare inference. Negative, missing, malformed amounts and missing currency/merchant still fail validation.
+
+The failed tap that happened before this update was not stored. Add that fare manually when its actual value is known.
 
 ## Exchange rates
 
