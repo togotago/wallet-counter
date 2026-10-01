@@ -121,7 +121,34 @@ async function run() {
   // The rate is pinned: later refreshes cannot retroactively alter the purchase.
   fxRows=[{date:'2026-11-08',base:'SEK',quote:'EUR',rate:0.2}];await w.fxRefresh();
   assert.equal(w.current().sum.tx.find(t=>t.merchant==='Rounding').sekMinor,1234);
+  // Transit authorizations must remain pending and never guess a fare.
+  const beforeTransit = w.current().sum.spent, beforeTransitRequests = requests;
+  const zero = {action:'capture',amount:0,currency:'SEK',merchant:'SL transit'};
+  await w.capture(zero);
+  const tap = w.current().sum.tx.find(t => t.merchant === 'SL transit');
+  assert.equal(tap.amount,0); assert.equal(tap.amountUnavailable,true);
+  assert.equal(tap.pendingReason,'wallet_zero_amount'); assert.equal(tap.sekMinor,null);
+  assert.equal(w.current().sum.spent,beforeTransit);
+  assert.equal(requests,beforeTransitRequests,'zero SEK tap must not request rates');
+  assert.equal(notifications.at(-1).title,'Wallet tap needs review');
+  assert.ok(outputs.at(-1).includes('no spending deducted'));
+  assert.throws(()=>w.parseAmount(0),'manual zero remains invalid');
+  assert.throws(()=>w.normalizeInput({...zero,amount:-1}));
+  assert.throws(()=>w.normalizeInput({...zero,amount:null}));
+  assert.throws(()=>w.normalizeInput({...zero,amount:NaN}));
+  assert.throws(()=>w.normalizeInput({...zero,currency:''}));
+  assert.throws(()=>w.normalizeInput({...zero,merchant:''}));
+  await w.capture({...zero,amount:'0,00',currency:'GBP',merchant:'Foreign transit'});
+  assert.equal(requests,beforeTransitRequests,'zero foreign tap must not request rates');
+  assert.equal(w.current().sum.spent,beforeTransit);
+  w.appendEvent({type:'conversion',target:tap.id,sekMinor:4300,fxEstimated:false});
+  assert.equal(w.current().sum.spent,beforeTransit+4300,'manual charge applied once');
+  w.appendEvent({type:'void',target:tap.id});
+  assert.equal(w.current().sum.spent,beforeTransit,'undo pending/corrected tap works');
+  const beforeDiagnostic=w.eventsRead().length;
+  await w.capture({...zero,action:'test'});
+  assert.equal(w.eventsRead().length,beforeDiagnostic,'zero diagnostic does not create spending');
   assert.ok(notifications.length>0);
-  console.log('PASS: parsing, Stockholm month boundaries, test/live capture, duplicates, conversion, refunds, allowance history invalid input, FX inversion/rounding, EUR/GBP/USD, offline cache/expiry, malformed rates, manual FX corrections and pinned estimates.');
+  console.log('PASS: parsing, Stockholm month boundaries, test/live capture, duplicates, conversion, refunds, allowance history invalid input, FX inversion/rounding, EUR/GBP/USD, offline cache/expiry, malformed rates, manual FX corrections pinned estimates, zero transit taps, no guessed fare, manual correction/undo and unchanged strict validation.');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});
