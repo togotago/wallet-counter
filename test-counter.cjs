@@ -10,7 +10,7 @@ const fm = {
   libraryDirectory: () => '/local', temporaryDirectory: () => '/tmp', joinPath: (a,b) => a+'/'+b,
   createDirectory(p) { dirs.add(p); }, fileExists: p => files.has(p) || dirs.has(p), readString: p => files.get(p),
   writeString: (p,s) => files.set(p,s),
-  move(a,b) { files.set(b,files.get(a)); files.delete(a); },
+  move(a,b) { if(files.has(b))throw Error('Destination exists'); if(!files.has(a))throw Error('Source missing'); files.set(b,files.get(a)); files.delete(a); },
   listContents(p) { return [...files.keys()].filter(k => k.startsWith(p+'/') && !k.slice(p.length+1).includes('/')).map(k => k.slice(p.length+1)); }
 };
 const notifications = [], outputs = [];
