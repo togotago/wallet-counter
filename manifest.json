@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "launcher": 1,
-  "version": "0.3.0",
-  "ref": "ab50a8497e295141684c87d4cb3766e13e541131",
-  "path": "releases/WalletCounter-0.3.0.js",
-  "sha256": "ab4ac34a3e7c86e76c796371dd00bd9fd73833b2848a4c0169a667be0abfd845",
-  "notes": "Local spending counter, free SEK exchange-rate estimates, manual update checks and program rollback."
+  "version": "0.3.1",
+  "ref": "808cf5f983d140ce91dbd020c909d071b0c467e8",
+  "path": "releases/WalletCounter-0.3.1.js",
+  "sha256": "5c889148ca211abbba8939cce36f78c70c4922f99884a53c9fdabcc401a3ee9b",
+  "notes": "Zero-value Wallet taps are saved for review without deducting a guessed fare. Regular capture, FX and existing history are preserved. Enter the actual SEK charge or undo transfer taps in Recent purchases."
 }
