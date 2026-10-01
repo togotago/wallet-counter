@@ -1,8 +1,8 @@
-// Wallet Counter engine v0.3.1 — loaded by the Wallet Counter launcher.
+// Wallet Counter engine v0.3.2 — loaded by the Wallet Counter launcher.
 // Purchase data stays local. Only public ECB exchange rates are requested.
 // Shortcut input: {action: 'test'|'capture', amount: '149.50', currency: 'SEK', merchant: 'ICA'}
 
-const VERSION = '0.3.1';
+const VERSION = '0.3.2';
 let updateController = null;
 const ZONE = 'Europe/Stockholm';
 
@@ -60,13 +60,22 @@ function normalizeInput(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Pass a Dictionary with action, amount, currency and merchant.');
   const action = String(raw.action || '').toLowerCase();
   if (!['test', 'capture'].includes(action)) throw new Error('Set action to test or capture.');
-  // A zero Wallet amount can be a transit authorization, not a final fare.
-  const amount = parseAmount(raw.amount, true);
-  const currency = String(raw.currency || '').trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency)) throw new Error('Missing currency code. Pass Currency Code, for example SEK.');
   const merchant = typeof raw.merchant === 'string' ? raw.merchant.trim().slice(0, 180) : '';
   if (!merchant) throw new Error('Missing merchant. Pass Merchant or Name from the Wallet transaction.');
-  return {action, amount, currency, merchant, card: typeof raw.card === 'string' ? raw.card.slice(0, 100) : ''};
+  // SL uses a configured fare, so its provisional Wallet amount is not parsed.
+  const sl = merchant.toLowerCase() === 'sl';
+  const amount = sl ? 0 : parseAmount(raw.amount, true);
+  const currency = sl ? 'SEK' : String(raw.currency || '').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error('Missing currency code. Pass Currency Code, for example SEK.');
+  return {action, amount, currency, merchant, sl, card: typeof raw.card === 'string' ? raw.card.slice(0, 100) : ''};
+}
+
+// One card/device: transfers never become anchors or extend the first tap's window.
+function slFare(transactions, now, fareMinor = 4300) {
+  const ticket = transactions.find(t => t.source === 'wallet' && t.slFareMinor != null && !t.slTransferOf &&
+    now.getTime() >= Date.parse(t.createdAt) && now.getTime() - Date.parse(t.createdAt) < 75 * 60000);
+  return {sekMinor: ticket ? 0 : fareMinor, slFareMinor: fareMinor,
+    slEstimated: !ticket, slTransferOf: ticket ? ticket.id : null};
 }
 
 function materialize(events) {
@@ -78,7 +87,7 @@ function materialize(events) {
   }
   for (const e of events) {
     if (e.type === 'void' && tx.has(e.target)) tx.get(e.target).voided = true;
-    else if (e.type === 'conversion' && tx.has(e.target)) Object.assign(tx.get(e.target), {sekMinor: e.sekMinor, fxEstimated: e.fxEstimated === true, fx: e.fx || null});
+    else if (e.type === 'conversion' && tx.has(e.target)) Object.assign(tx.get(e.target), {sekMinor: e.sekMinor, fxEstimated: e.fxEstimated === true, fx: e.fx || null, slEstimated: false});
     else if (e.type === 'review' && tx.has(e.target)) tx.get(e.target).reviewed = true;
   }
   return [...tx.values()].filter(t => !t.voided);
@@ -95,7 +104,7 @@ function summary(events, settings, month = monthKey()) {
   const spent = tx.reduce((n,t) => n + (t.sekMinor == null ? 0 : t.sekMinor) * (t.type === 'refund' ? -1 : 1), 0);
   const allowance = Object.prototype.hasOwnProperty.call(settings.months, month) ? settings.months[month] : null;
   const unresolved = tx.filter(t => t.sekMinor == null || (t.duplicateOf && !t.reviewed)).length;
-  return {tx, spent, allowance, remaining: allowance == null ? null : allowance - spent, unresolved, estimated: tx.filter(t => t.fxEstimated).length};
+  return {tx, spent, allowance, remaining: allowance == null ? null : allowance - spent, unresolved, estimated: tx.filter(t => t.fxEstimated || t.slEstimated).length};
 }
 
 const fm = FileManager.local();
@@ -218,21 +227,24 @@ async function capture(raw) {
   if (input.action === 'test') {
     ensureStorage();
     writeJSON(fm.joinPath(root, 'last-capture-test.json'), {...input, observedAt: new Date().toISOString()});
-    const text = input.amount + ' ' + input.currency + ' at ' + input.merchant + '. TEST ONLY: no spending added.';
+    const text = (input.sl ? 'SL fare estimate' : input.amount + ' ' + input.currency + ' at ' + input.merchant) + '. TEST ONLY: no spending added.';
     await notify('Wallet capture test passed', text);
     Script.setShortcutOutput(text); return;
   }
   const state = current(), now = new Date();
-  const amountUnavailable = input.amount === 0;
-  const dup = duplicateOf(materialize(state.events), input, now);
+  const transactions = materialize(state.events);
+  const transit = input.sl ? slFare(transactions, now, state.settings.slFareMinor || 4300) : null;
+  const amountUnavailable = !input.sl && input.amount === 0;
+  const dup = input.sl ? null : duplicateOf(transactions, input, now);
   const saved = appendEvent({type: 'purchase', source: 'wallet', month: monthKey(now),
-    amount: input.amount, currency: input.currency, merchant: input.merchant, card: input.card,
+    amount: transit ? transit.sekMinor / 100 : input.amount, currency: input.currency, merchant: input.merchant, card: input.card,
     sekMinor: !amountUnavailable && input.currency === 'SEK' ? minor(input.amount) : null,
     amountUnavailable, pendingReason: amountUnavailable ? 'wallet_zero_amount' : null,
-    duplicateOf: dup ? dup.id : null, reviewed: false, allowanceAtCapture: state.sum.allowance});
+    duplicateOf: dup ? dup.id : null, reviewed: false, allowanceAtCapture: state.sum.allowance,
+    ...(transit || {})});
   // Save the purchase before requesting rates. A network failure cannot lose it.
   let estimate = null;
-  if (!amountUnavailable && input.currency !== 'SEK') {
+  if (!input.sl && !amountUnavailable && input.currency !== 'SEK') {
     try {
       estimate = await fxEstimate(input.currency, input.amount);
       if (estimate) appendEvent({type: 'conversion', target: saved.id, ...estimate});
@@ -240,7 +252,8 @@ async function capture(raw) {
   }
   const after = current().sum;
   let text = after.remaining == null ? 'Saved. Open Wallet Counter to set your allowance.' : money(after.remaining) + ' remaining this month.';
-  if (amountUnavailable) text += ' Wallet supplied a zero amount. Tap saved for review; no spending deducted. Set the actual SEK charge in Recent purchases, or undo this tap if it did not create a separate charge.';
+  if (transit) text += transit.slTransferOf ? ' SL transfer: no additional fare; the original 75-minute window is unchanged.' : ' SL estimated: ' + money(transit.sekMinor) + ' deducted for a new 75-minute ticket.';
+  else if (amountUnavailable) text += ' Wallet supplied a zero amount. Tap saved for review; no spending deducted. Set the actual SEK charge in Recent purchases, or undo this tap if it did not create a separate charge.';
   else if (estimate) text += ' ' + input.amount + ' ' + input.currency + ' deducted as approximately ' + money(estimate.sekMinor) + ' (ECB ' + estimate.fx.rateDate + ').';
   else if (input.currency !== 'SEK') text += ' No usable rate: convert ' + input.amount + ' ' + input.currency + ' in Recent purchases; it is not yet deducted.';
   if (dup) text += ' Possible duplicate: both purchases remain counted until reviewed.';
@@ -277,12 +290,15 @@ async function recent() {
   const st = current();
   const tx = materialize(st.events).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 25);
   if (!tx.length) { await message('No purchases yet', 'Test captures do not count as spending.'); return; }
-  const labels = tx.map(t => (t.sekMinor == null ? '⚠ ' : t.fxEstimated ? '≈ ' : '') + t.merchant + ' · ' +
-    (t.sekMinor == null ? t.amountUnavailable ? 'Amount unavailable' : t.amount + ' ' + t.currency : money(t.sekMinor)) + (t.duplicateOf && !t.reviewed ? ' · CHECK' : ''));
+  const labels = tx.map(t => (t.sekMinor == null ? '⚠ ' : t.fxEstimated || t.slEstimated ? '≈ ' : '') + t.merchant + ' · ' +
+    (t.sekMinor == null ? t.amountUnavailable ? 'Amount unavailable' : t.amount + ' ' + t.currency : money(t.sekMinor)) +
+    (t.slTransferOf ? ' · transfer' : t.slEstimated ? ' · SL estimated' : '') + (t.duplicateOf && !t.reviewed ? ' · CHECK' : ''));
   const i = await choice('Recent purchases', 'Newest first. Export includes your full history.', labels);
   if (i < 0) return;
   const t = tx[i];
-  const action = await choice(t.merchant, t.createdAt + '\n' + (t.amountUnavailable ? 'Wallet reported zero; final charge unavailable.' : t.amount + ' ' + t.currency) + '\nMonth: ' + t.month + (t.fxEstimated ? '\nEstimated with ' + t.fx.provider + ': ' + t.fx.rate + ' SEK per unit, dated ' + t.fx.rateDate : ''),
+  const action = await choice(t.merchant, t.createdAt + '\n' + (t.amountUnavailable ? 'Wallet reported zero; final charge unavailable.' : t.amount + ' ' + t.currency) + '\nMonth: ' + t.month +
+    (t.slTransferOf ? '\nSL transfer linked to ticket ' + t.slTransferOf + '; original window unchanged.' : t.slEstimated ? '\nSL estimated fare; 75 minutes from this tap. Wallet amount ignored.' : '') +
+    (t.fxEstimated ? '\nEstimated with ' + t.fx.provider + ': ' + t.fx.rate + ' SEK per unit, dated ' + t.fx.rateDate : ''),
     ['Set / correct SEK amount', 'Keep and mark reviewed', 'Undo this entry']);
   if (action === 0) {
     const v = await ask('SEK amount', 'Enter the total SEK value, not an exchange rate.',
@@ -322,7 +338,7 @@ async function widget() {
   line('SPENDING · ' + monthKey(), 11, 'A4C8BA', true); w.addSpacer(8);
   line(s.remaining == null ? 'Set allowance' : money(s.remaining), config.widgetFamily === 'small' ? 25 : 32,
     s.remaining != null && s.remaining < 0 ? 'FF9F9F' : 'E9FFF4', true);
-  line(s.remaining == null ? 'Tap to get started' : s.unresolved ? 'Estimated remaining · review needed' : s.estimated ? 'Remaining · includes FX estimates' : 'Remaining this month', 11, 'A4C8BA');
+  line(s.remaining == null ? 'Tap to get started' : s.unresolved ? 'Estimated remaining · review needed' : s.estimated ? 'Remaining · includes estimates' : 'Remaining this month', 11, 'A4C8BA');
   w.addSpacer(10);
   if (s.allowance != null) {
     const width = config.widgetFamily === 'small' ? 115 : 270;
@@ -346,7 +362,7 @@ async function menu() {
   const title = st.sum.remaining == null ? 'Wallet Counter' : money(st.sum.remaining) + ' remaining';
   const i = await choice(title, 'Monthly SEK allowance · resets on the 1st · no rollover',
     ['Preview widget', 'Change allowance', 'Add purchase / opening spend', 'Add refund', 'Recent purchases / corrections',
-      'Monthly history', 'Export backup', 'Toggle purchase notifications', 'View capture test', 'Refresh exchange rates', 'Check for updates', 'Restore previous version']);
+      'Monthly history', 'Export backup', 'Toggle purchase notifications', 'View capture test', 'Refresh exchange rates', 'Check for updates', 'Restore previous version', 'Change SL fare']);
   if (i === 0) await (await widget()).presentMedium();
   else if (i === 1) await setAllowance();
   else if (i === 2) await manualEntry();
@@ -366,6 +382,11 @@ async function menu() {
   }
   else if (i === 10 && updateController) await updateController.check();
   else if (i === 11 && updateController) await updateController.rollback();
+  else if (i === 12) {
+    const v = await ask('SL estimated fare', 'One card/device. Applies to new 75-minute tickets; existing entries stay unchanged.',
+      [['Fare in SEK', String((st.settings.slFareMinor || 4300) / 100)]]);
+    if (v) { const s = st.settings; s.slFareMinor = minor(parseAmount(v[0])); settingsSave(s); }
+  }
 }
 
 async function main() {
