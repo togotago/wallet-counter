@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "launcher": 1,
-  "version": "0.3.2",
-  "ref": "7b5f7746c9dfd0063c735aaf08a8261b4cdf7fd0",
-  "path": "releases/WalletCounter-0.3.2.js",
-  "sha256": "deb4be6a3cb5b25e61ca88e925b1e7f212446f2827af87f2e351756c40c66a69",
-  "notes": "SL estimated fares: 43 SEK per fixed 75-minute window for exact merchant Sl. Transfers do not restart the window. One card/iPhone, editable fare; existing Shortcut unchanged. Wallet SL amount/currency ignored. Estimates only; normal purchases, FX and history preserved."
+  "version": "0.3.3",
+  "ref": "d717602f610cc7678092294ead9b537df00b478e",
+  "path": "releases/WalletCounter-0.3.3.js",
+  "sha256": "fc7bb28027fbbb8a8f6e7115d5f159afa1e0c31ae3ab5dc24617e525df472c1a",
+  "notes": "Storage replacement repair. If updating fails with an existing-file error, first replace your Wallet Counter script with launcher v1.0.1 from the repo. Preserves SL 75-minute estimates, FX and existing history; repairs settings, FX-cache and diagnostic rewrites."
 }
