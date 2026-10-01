@@ -4,10 +4,10 @@ const source=fs.readFileSync(__dirname+'/Wallet-Counter-Launcher.js','utf8');
 const actualEngine=fs.readFileSync(__dirname+'/WalletCounter.js','utf8');
 const digest=s=>crypto.createHash('sha256').update(s).digest('hex');
 const fileMap=new Map(),directories=new Set(),requests=[],messages=[],outputs=[];
-let seq=0,failWrite=false,network=new Map(),selections=[];
+let seq=0,failWrite=false,partialWrite=false,network=new Map(),selections=[];
 const fm={libraryDirectory:()=>'/local',joinPath:(a,b)=>a+'/'+b,createDirectory:p=>directories.add(p),
  fileExists:p=>fileMap.has(p)||directories.has(p),readString:p=>{if(!fileMap.has(p))throw Error('Missing');return fileMap.get(p)},
- writeString:(p,s)=>fileMap.set(p,s),move:(a,b)=>{if(failWrite && b.endsWith('/active.json')) throw Error('Disk full');fileMap.set(b,fileMap.get(a));fileMap.delete(a)},
+ writeString:(p,s)=>{if(failWrite && p.endsWith('/active.json')) {if(partialWrite)fileMap.set(p,'{broken');throw Error('Disk full')}fileMap.set(p,s)},move:(a,b)=>{if(fileMap.has(b))throw Error('Destination exists');if(!fileMap.has(a))throw Error('Source missing');fileMap.set(b,fileMap.get(a));fileMap.delete(a)},
  listContents:p=>[...fileMap.keys()].filter(k=>k.startsWith(p+'/')&&!k.slice(p.length+1).includes('/')).map(k=>k.slice(p.length+1))};
 class Request{constructor(url){this.url=url}async loadString(){assert.equal(this.timeoutInterval,10);assert.equal(this.onRedirect({url:'https://evil.example'}),null);requests.push(this.url);const v=network.get(this.url.split('?')[0]);if(!v)throw Error('Offline');this.response={statusCode:v.status||200};return v.body}}
 const globals={console,FileManager:{local:()=>fm},UUID:{string:()=>String(++seq)},Request,
@@ -44,13 +44,23 @@ async function main(){
  serve(r2);failWrite=true;
  await assert.rejects(()=>api.installRelease(api.validateManifest(r2),api.readPointer()),/Disk full/);
  failWrite=false;assert.equal(fileMap.get('/local/WalletCounter-updater-v1/active.json'),originalPointer);
+ // Reproduce a partial pointer write and a failed restoration. Backup must still load.
+ failWrite=true;partialWrite=true;
+ await assert.rejects(()=>api.installRelease(api.validateManifest(r2),api.readPointer()),/Disk full/);
+ assert.equal(api.readPointer().active.version,'0.3.0');
+ failWrite=false;partialWrite=false;
+ fileMap.delete('/local/WalletCounter-updater-v1/active.json');
+ assert.equal(api.readPointer().active.version,'0.3.0','missing pointer recovers backup');
+ api.writePointer(api.readPointer());
+ assert.equal(fileMap.get('/local/WalletCounter-updater-v1/active.json'),originalPointer);
+
  selections=[-1];assert.equal(await api.checkUpdates(),false);assert.equal(api.readPointer().active.version,'0.3.0');
  selections=[0];assert.equal(await api.checkUpdates(),true);
  assert.equal(api.readPointer().active.version,'0.4.0');assert.equal(api.readPointer().previous.version,'0.3.0');
  assert.equal(await api.rollbackRelease(),true);assert.equal(api.readPointer().active.version,'0.3.0');
  const lower=release('0.2.0');serve(lower);const n=requests.length;assert.equal(await api.checkUpdates(),false);assert.equal(requests.length,n+1);
  network.clear();const before=fileMap.get('/local/WalletCounter-updater-v1/active.json');assert.equal(await api.checkUpdates(),false);assert.equal(fileMap.get('/local/WalletCounter-updater-v1/active.json'),before);
- const actual=release('0.3.2',actualEngine);serve(actual);await api.installRelease(api.validateManifest(actual),null);
+ const actual=release('0.3.3',actualEngine);serve(actual);await api.installRelease(api.validateManifest(actual),null);
  fileMap.set('/local/WalletCounter-v1/settings.json',JSON.stringify({schema:1,monthlyDefault:600000,months:{},notifications:false}));
  const oldEvent=JSON.stringify({schema:1,id:'old',type:'purchase',source:'manual',amount:50,currency:'SEK',sekMinor:5000,merchant:'Fixture',createdAt:new Date().toISOString(),month:new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Stockholm',year:'numeric',month:'2-digit'}).format(new Date())});
  fileMap.set('/local/WalletCounter-v1/events/old.json',oldEvent);
@@ -82,6 +92,6 @@ async function main(){
  assert.equal(requests.length,networkCount,'SL capture through unchanged launcher stays offline');
  for(const [p,s]of oldData)assert.equal(fileMap.get(p),s);
 
- console.log('PASS: SHA-256 UTF-8 vectors, fixed repo/immutable ref, manifest validation, corrupt/syntax/contract failures, interrupted pointer write, cancel, upgrade, rollback, downgrade refusal, offline update, real-engine offline SEK and SL ticket/transfer capture, preserved existing records.');
+ console.log('PASS: SHA-256 UTF-8 vectors, fixed repo/immutable ref, manifest validation, corrupt/syntax/contract failures, strict move semantics, retry of downloaded release, partial/missing pointer backup recovery, cancel, upgrade, rollback, downgrade refusal, offline update, real-engine offline SEK and SL ticket/transfer capture, preserved existing records.');
 }
 main().catch(e=>{console.error(e);process.exitCode=1});
