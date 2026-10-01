@@ -50,7 +50,7 @@ async function main(){
  assert.equal(await api.rollbackRelease(),true);assert.equal(api.readPointer().active.version,'0.3.0');
  const lower=release('0.2.0');serve(lower);const n=requests.length;assert.equal(await api.checkUpdates(),false);assert.equal(requests.length,n+1);
  network.clear();const before=fileMap.get('/local/WalletCounter-updater-v1/active.json');assert.equal(await api.checkUpdates(),false);assert.equal(fileMap.get('/local/WalletCounter-updater-v1/active.json'),before);
- const actual=release('0.3.0',actualEngine);serve(actual);await api.installRelease(api.validateManifest(actual),null);
+ const actual=release('0.3.1',actualEngine);serve(actual);await api.installRelease(api.validateManifest(actual),null);
  fileMap.set('/local/WalletCounter-v1/settings.json',JSON.stringify({schema:1,monthlyDefault:600000,months:{},notifications:false}));
  const oldEvent=JSON.stringify({schema:1,id:'old',type:'purchase',source:'manual',amount:50,currency:'SEK',sekMinor:5000,merchant:'Fixture',createdAt:new Date().toISOString(),month:new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Stockholm',year:'numeric',month:'2-digit'}).format(new Date())});
  fileMap.set('/local/WalletCounter-v1/events/old.json',oldEvent);
@@ -62,6 +62,16 @@ async function main(){
  const purchases=[...fileMap].filter(([p])=>p.startsWith('/local/WalletCounter-v1/events/')&&p.endsWith('.json')).map(([,s])=>JSON.parse(s));
  assert.equal(purchases.length,2);assert.equal(purchases.find(p=>p.id!=='old').sekMinor,2000);
  assert.ok(outputs.at(-1).includes('remaining'));
+ const beforeZero=purchases.length;
+ globals.args.shortcutParameter={action:'capture',amount:0,currency:'SEK',merchant:'SL transit'};
+ await api.launcherMain();
+ const afterZero=[...fileMap].filter(([p])=>p.startsWith('/local/WalletCounter-v1/events/')&&p.endsWith('.json')).map(([,s])=>JSON.parse(s));
+ assert.equal(afterZero.length,beforeZero+1);
+ const tap=afterZero.find(p=>p.merchant==='SL transit');
+ assert.equal(tap.sekMinor,null);assert.equal(tap.amountUnavailable,true);
+ assert.ok(outputs.at(-1).includes('no spending deducted'));
+ assert.equal(requests.length,networkCount);
+
  console.log('PASS: SHA-256 UTF-8 vectors, fixed repo/immutable ref, manifest validation, corrupt/syntax/contract failures, interrupted pointer write, cancel, upgrade, rollback, downgrade refusal, offline update, real-engine offline SEK capture, preserved existing records.');
 }
 main().catch(e=>{console.error(e);process.exitCode=1});
