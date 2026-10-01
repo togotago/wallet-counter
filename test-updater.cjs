@@ -6,7 +6,7 @@ const digest=s=>crypto.createHash('sha256').update(s).digest('hex');
 const fileMap=new Map(),directories=new Set(),requests=[],messages=[],outputs=[];
 let seq=0,failWrite=false,network=new Map(),selections=[];
 const fm={libraryDirectory:()=>'/local',joinPath:(a,b)=>a+'/'+b,createDirectory:p=>directories.add(p),
- fileExists:p=>fileMap.has(p),readString:p=>{if(!fileMap.has(p))throw Error('Missing');return fileMap.get(p)},
+ fileExists:p=>fileMap.has(p)||directories.has(p),readString:p=>{if(!fileMap.has(p))throw Error('Missing');return fileMap.get(p)},
  writeString:(p,s)=>fileMap.set(p,s),move:(a,b)=>{if(failWrite && b.endsWith('/active.json')) throw Error('Disk full');fileMap.set(b,fileMap.get(a));fileMap.delete(a)},
  listContents:p=>[...fileMap.keys()].filter(k=>k.startsWith(p+'/')&&!k.slice(p.length+1).includes('/')).map(k=>k.slice(p.length+1))};
 class Request{constructor(url){this.url=url}async loadString(){assert.equal(this.timeoutInterval,10);assert.equal(this.onRedirect({url:'https://evil.example'}),null);requests.push(this.url);const v=network.get(this.url.split('?')[0]);if(!v)throw Error('Offline');this.response={statusCode:v.status||200};return v.body}}
@@ -50,7 +50,7 @@ async function main(){
  assert.equal(await api.rollbackRelease(),true);assert.equal(api.readPointer().active.version,'0.3.0');
  const lower=release('0.2.0');serve(lower);const n=requests.length;assert.equal(await api.checkUpdates(),false);assert.equal(requests.length,n+1);
  network.clear();const before=fileMap.get('/local/WalletCounter-updater-v1/active.json');assert.equal(await api.checkUpdates(),false);assert.equal(fileMap.get('/local/WalletCounter-updater-v1/active.json'),before);
- const actual=release('0.3.1',actualEngine);serve(actual);await api.installRelease(api.validateManifest(actual),null);
+ const actual=release('0.3.2',actualEngine);serve(actual);await api.installRelease(api.validateManifest(actual),null);
  fileMap.set('/local/WalletCounter-v1/settings.json',JSON.stringify({schema:1,monthlyDefault:600000,months:{},notifications:false}));
  const oldEvent=JSON.stringify({schema:1,id:'old',type:'purchase',source:'manual',amount:50,currency:'SEK',sekMinor:5000,merchant:'Fixture',createdAt:new Date().toISOString(),month:new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Stockholm',year:'numeric',month:'2-digit'}).format(new Date())});
  fileMap.set('/local/WalletCounter-v1/events/old.json',oldEvent);
@@ -71,7 +71,17 @@ async function main(){
  assert.equal(tap.sekMinor,null);assert.equal(tap.amountUnavailable,true);
  assert.ok(outputs.at(-1).includes('no spending deducted'));
  assert.equal(requests.length,networkCount);
+ globals.args.shortcutParameter={action:'capture',amount:-1,currency:'',merchant:'Sl'};
+ await api.launcherMain();
+ globals.args.shortcutParameter={action:'capture',amount:43,currency:'SEK',merchant:'Sl'};
+ await api.launcherMain();
+ const sl=[...fileMap].filter(([p])=>p.startsWith('/local/WalletCounter-v1/events/')&&p.endsWith('.json'))
+   .map(([,s])=>JSON.parse(s)).filter(p=>p.slFareMinor != null);
+ assert.equal(sl.length,2);assert.equal(sl.reduce((n,p)=>n+p.sekMinor,0),4300);
+ assert.equal(sl.find(p=>p.slTransferOf).slTransferOf,sl.find(p=>!p.slTransferOf).id);
+ assert.equal(requests.length,networkCount,'SL capture through unchanged launcher stays offline');
+ for(const [p,s]of oldData)assert.equal(fileMap.get(p),s);
 
- console.log('PASS: SHA-256 UTF-8 vectors, fixed repo/immutable ref, manifest validation, corrupt/syntax/contract failures, interrupted pointer write, cancel, upgrade, rollback, downgrade refusal, offline update, real-engine offline SEK capture, preserved existing records.');
+ console.log('PASS: SHA-256 UTF-8 vectors, fixed repo/immutable ref, manifest validation, corrupt/syntax/contract failures, interrupted pointer write, cancel, upgrade, rollback, downgrade refusal, offline update, real-engine offline SEK and SL ticket/transfer capture, preserved existing records.');
 }
 main().catch(e=>{console.error(e);process.exitCode=1});
