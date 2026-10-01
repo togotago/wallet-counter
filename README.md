@@ -6,7 +6,7 @@ Apple Wallet → personal Shortcuts automation → Scriptable → local purchase
 
 ## Install once
 
-The current release is v0.3.1. The published manifest selects the tested release at an immutable commit.
+The current release is v0.3.2. The published manifest selects the tested release at an immutable commit.
 
 1. Keep a copy of your existing Wallet Counter script. You can also use Export backup for a readable record of your spending; automatic data import is not implemented.
 2. Replace the contents of the existing **Wallet Counter** Scriptable script with `Wallet-Counter-Launcher.js`. Keep the same script name.
@@ -25,11 +25,17 @@ All purchases, merchant names, allowance settings and history stay in local Scri
 
 A private repository would need separate authenticated downloads and a narrowly scoped read-only token stored in Scriptable Keychain. This launcher deliberately uses public hosting and contains no token.
 
-## Transit taps with no fare yet
+## SL estimated fares
 
-Some transit systems calculate and charge fares later. v0.3.1 saves a Wallet tap whose amount is zero as a pending entry with no SEK deduction. The widget flags it for review. Open Recent purchases / corrections to enter the actual charge, or undo transfer taps that did not create separate charges. There is no automatic bank reconciliation or fare inference. Negative, missing, malformed amounts and missing currency/merchant still fail validation.
+v0.3.2 treats only the exact merchant name `Sl` (case-insensitive, surrounding spaces ignored) as an SL tap. This name is provisional from Wallet's display and still needs confirmation on the next normal journey. Other merchant names use ordinary capture validation.
 
-The failed tap that happened before this update was not stored. Add that fare manually when its actual value is known.
+The first SL tap deducts an estimated 43 SEK. Further taps inside 75 minutes are saved as zero-cost transfers linked to that first ticket. Transfers never restart the clock. The next tap at or after 75 minutes starts a new ticket; expiry alone never creates a charge. The window is read from existing event history, persists across app restarts, and spans midnight/month boundaries. The fare belongs to the month of the first tap. There is no separate timer file, background process or network request.
+
+This is a single-card, single-iPhone estimate, not bank reconciliation. SL Wallet amount and currency values are ignored, including negative or missing values; recorded amounts are the inferred fare, not the issuer's raw amount. Use **Change SL fare** to edit the fare for future tickets. Corrected tickets retain their start time; undone tickets stop acting as anchors. Transfers remain zero-cost records when a ticket is undone. Recent purchases labels estimates and transfers; ordinary correction/undo and export still work.
+
+Keep the existing Shortcut unchanged. If iOS fails to extract transaction fields before Scriptable runs, a script update cannot fix that earlier failure; a merchant-first Shortcut branch may then be needed. Missed/rejected taps, a different merchant name or switching cards/devices can make estimates wrong. Monarch remains the main financial tracker. A later Wallet display update is not assumed to trigger another automation.
+
+For other merchants, zero Wallet amounts remain pending with no deduction. Negative/missing/malformed amounts still fail validation. Failed earlier taps were not stored; add an actual fare manually if needed. No old SL entries are reclassified automatically.
 
 ## Exchange rates
 
