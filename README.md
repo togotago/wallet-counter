@@ -6,7 +6,7 @@ Apple Wallet → personal Shortcuts automation → Scriptable → local purchase
 
 ## Install once
 
-The current release is v0.3.2. The published manifest selects the tested release at an immutable commit.
+The current release is v0.3.3. The published manifest selects the tested release at an immutable commit.
 
 1. Keep a copy of your existing Wallet Counter script. You can also use Export backup for a readable record of your spending; automatic data import is not implemented.
 2. Replace the contents of the existing **Wallet Counter** Scriptable script with `Wallet-Counter-Launcher.js`. Keep the same script name.
@@ -15,9 +15,15 @@ The current release is v0.3.2. The published manifest selects the tested release
 
 This installation needs one last copy-paste. Later program updates use **Check for updates** in the Wallet Counter menu. Install is optional. Updates take effect on the next run. A previous program version is available after the next upgrade; **Restore previous version** switches back without undoing spending. For the first installation, retain the old script as your backup.
 
+## Repair the launcher update error
+
+Launcher v1.0.0 could fail with "an item with the same name already exists" when moving a temporary file onto an existing update pointer. The same move assumption also affected engine settings, FX cache and capture-test rewrites. Launcher v1.0.1 and engine v0.3.3 use documented `writeString` replacement behavior instead. Existing download files can be reused on retries, and a pointer backup supports recovery from missing or damaged pointer writes. Tests now reject moves onto existing destinations, as observed on the affected iPhone.
+
+Replace the contents of the existing **Wallet Counter** script with the latest `Wallet-Counter-Launcher.js`, keeping the same name. Open it and choose **Check for updates**, then install v0.3.3. Do not delete Scriptable or its data folders. This launcher repair requires one manual copy-paste; ordinary engine updates still use the menu. Local purchase and allowance files are reused. This fixes the observed failure, but does not claim native on-device verification or filesystem crash atomicity.
+
 ## Updates and trust
 
-The launcher reads only `togotago/wallet-counter` on GitHub. A small manifest points to a versioned module at an immutable commit. The launcher checks SHA-256, JavaScript syntax, and the module version and interface before changing the active version. A complete module is saved before the pointer is replaced. Failed downloads or validation leave the active pointer unchanged. There are no automatic update checks during captures or widget rendering.
+The launcher reads only `togotago/wallet-counter` on GitHub. A small manifest points to a versioned module at an immutable commit. The launcher checks SHA-256, JavaScript syntax, and the module version and interface before changing the active version. A complete module is saved and validated before the active pointer is written. The launcher keeps a pointer backup for interrupted-write recovery. Failed downloads or validation leave the active pointer unchanged. There are no automatic update checks during captures or widget rendering.
 
 The checksum detects incomplete or altered files. It is not a publisher signature. Anyone who can change the trusted repository can publish code that runs with Scriptable permissions on the device. Protect the GitHub account and limit repository write access. Public readers cannot push changes merely because the repository is public.
 
