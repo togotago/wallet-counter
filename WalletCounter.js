@@ -1,8 +1,8 @@
-// Wallet Counter engine v0.3.2 — loaded by the Wallet Counter launcher.
+// Wallet Counter engine v0.3.3 — loaded by the Wallet Counter launcher.
 // Purchase data stays local. Only public ECB exchange rates are requested.
 // Shortcut input: {action: 'test'|'capture', amount: '149.50', currency: 'SEK', merchant: 'ICA'}
 
-const VERSION = '0.3.2';
+const VERSION = '0.3.3';
 let updateController = null;
 const ZONE = 'Europe/Stockholm';
 
@@ -119,9 +119,7 @@ function settingsRead() {
   return s;
 }
 function writeJSON(path, data) {
-  const tmp = path + '.' + UUID.string() + '.tmp';
-  fm.writeString(tmp, JSON.stringify(data));
-  fm.move(tmp, path);
+  fm.writeString(path, JSON.stringify(data));
 }
 function settingsSave(s) { ensureStorage(); writeJSON(settingsPath, s); }
 function eventsRead() {
