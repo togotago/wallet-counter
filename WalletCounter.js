@@ -1,8 +1,8 @@
-// Wallet Counter engine v0.3.0 — loaded by the Wallet Counter launcher.
+// Wallet Counter engine v0.3.1 — loaded by the Wallet Counter launcher.
 // Purchase data stays local. Only public ECB exchange rates are requested.
 // Shortcut input: {action: 'test'|'capture', amount: '149.50', currency: 'SEK', merchant: 'ICA'}
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 let updateController = null;
 const ZONE = 'Europe/Stockholm';
 
@@ -13,9 +13,9 @@ function monthKey(date = new Date()) {
   return parts.find(p => p.type === 'year').value + '-' + parts.find(p => p.type === 'month').value;
 }
 
-function parseAmount(input) {
+function parseAmount(input, allowZero = false) {
   if (typeof input === 'number') {
-    if (!Number.isFinite(input) || input <= 0 || input > 100000000) throw new Error('Amount must be a positive number.');
+    if (!Number.isFinite(input) || input < 0 || (!allowZero && input === 0) || input > 100000000) throw new Error('Amount must be a positive number.');
     return input;
   }
   if (typeof input !== 'string') throw new Error('Pass the Amount property, not the whole Wallet transaction.');
@@ -39,7 +39,7 @@ function parseAmount(input) {
     s = pair[0] + '.' + pair[1];
   }
   const n = Number(s);
-  if (!Number.isFinite(n) || n <= 0 || n > 100000000) throw new Error('Amount must be a positive number.');
+  if (!Number.isFinite(n) || n < 0 || (!allowZero && n === 0) || n > 100000000) throw new Error('Amount must be a positive number.');
   return n;
 }
 
@@ -60,7 +60,8 @@ function normalizeInput(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Pass a Dictionary with action, amount, currency and merchant.');
   const action = String(raw.action || '').toLowerCase();
   if (!['test', 'capture'].includes(action)) throw new Error('Set action to test or capture.');
-  const amount = parseAmount(raw.amount);
+  // A zero Wallet amount can be a transit authorization, not a final fare.
+  const amount = parseAmount(raw.amount, true);
   const currency = String(raw.currency || '').trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error('Missing currency code. Pass Currency Code, for example SEK.');
   const merchant = typeof raw.merchant === 'string' ? raw.merchant.trim().slice(0, 180) : '';
@@ -222,14 +223,16 @@ async function capture(raw) {
     Script.setShortcutOutput(text); return;
   }
   const state = current(), now = new Date();
+  const amountUnavailable = input.amount === 0;
   const dup = duplicateOf(materialize(state.events), input, now);
   const saved = appendEvent({type: 'purchase', source: 'wallet', month: monthKey(now),
     amount: input.amount, currency: input.currency, merchant: input.merchant, card: input.card,
-    sekMinor: input.currency === 'SEK' ? minor(input.amount) : null,
+    sekMinor: !amountUnavailable && input.currency === 'SEK' ? minor(input.amount) : null,
+    amountUnavailable, pendingReason: amountUnavailable ? 'wallet_zero_amount' : null,
     duplicateOf: dup ? dup.id : null, reviewed: false, allowanceAtCapture: state.sum.allowance});
   // Save the purchase before requesting rates. A network failure cannot lose it.
   let estimate = null;
-  if (input.currency !== 'SEK') {
+  if (!amountUnavailable && input.currency !== 'SEK') {
     try {
       estimate = await fxEstimate(input.currency, input.amount);
       if (estimate) appendEvent({type: 'conversion', target: saved.id, ...estimate});
@@ -237,10 +240,11 @@ async function capture(raw) {
   }
   const after = current().sum;
   let text = after.remaining == null ? 'Saved. Open Wallet Counter to set your allowance.' : money(after.remaining) + ' remaining this month.';
-  if (estimate) text += ' ' + input.amount + ' ' + input.currency + ' deducted as approximately ' + money(estimate.sekMinor) + ' (ECB ' + estimate.fx.rateDate + ').';
+  if (amountUnavailable) text += ' Wallet supplied a zero amount. Tap saved for review; no spending deducted. Set the actual SEK charge in Recent purchases, or undo this tap if it did not create a separate charge.';
+  else if (estimate) text += ' ' + input.amount + ' ' + input.currency + ' deducted as approximately ' + money(estimate.sekMinor) + ' (ECB ' + estimate.fx.rateDate + ').';
   else if (input.currency !== 'SEK') text += ' No usable rate: convert ' + input.amount + ' ' + input.currency + ' in Recent purchases; it is not yet deducted.';
   if (dup) text += ' Possible duplicate: both purchases remain counted until reviewed.';
-  if (state.settings.notifications || input.currency !== 'SEK' || dup) await notify('Wallet Counter', text);
+  if (state.settings.notifications || amountUnavailable || input.currency !== 'SEK' || dup) await notify(amountUnavailable ? 'Wallet tap needs review' : 'Wallet Counter', text);
   Script.setShortcutOutput(text);
 }
 
@@ -274,11 +278,11 @@ async function recent() {
   const tx = materialize(st.events).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 25);
   if (!tx.length) { await message('No purchases yet', 'Test captures do not count as spending.'); return; }
   const labels = tx.map(t => (t.sekMinor == null ? '⚠ ' : t.fxEstimated ? '≈ ' : '') + t.merchant + ' · ' +
-    (t.sekMinor == null ? t.amount + ' ' + t.currency : money(t.sekMinor)) + (t.duplicateOf && !t.reviewed ? ' · CHECK' : ''));
+    (t.sekMinor == null ? t.amountUnavailable ? 'Amount unavailable' : t.amount + ' ' + t.currency : money(t.sekMinor)) + (t.duplicateOf && !t.reviewed ? ' · CHECK' : ''));
   const i = await choice('Recent purchases', 'Newest first. Export includes your full history.', labels);
   if (i < 0) return;
   const t = tx[i];
-  const action = await choice(t.merchant, t.createdAt + '\n' + t.amount + ' ' + t.currency + '\nMonth: ' + t.month + (t.fxEstimated ? '\nEstimated with ' + t.fx.provider + ': ' + t.fx.rate + ' SEK per unit, dated ' + t.fx.rateDate : ''),
+  const action = await choice(t.merchant, t.createdAt + '\n' + (t.amountUnavailable ? 'Wallet reported zero; final charge unavailable.' : t.amount + ' ' + t.currency) + '\nMonth: ' + t.month + (t.fxEstimated ? '\nEstimated with ' + t.fx.provider + ': ' + t.fx.rate + ' SEK per unit, dated ' + t.fx.rateDate : ''),
     ['Set / correct SEK amount', 'Keep and mark reviewed', 'Undo this entry']);
   if (action === 0) {
     const v = await ask('SEK amount', 'Enter the total SEK value, not an exchange rate.',
