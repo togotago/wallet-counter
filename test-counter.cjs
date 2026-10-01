@@ -26,7 +26,7 @@ const context = vm.createContext({Date: Clock, Intl, console, FileManager: {loca
   config: {runsInApp:false,runsInWidget:false}, args: {shortcutParameter:null}
 });
 const src = fs.readFileSync(path.join(__dirname,'WalletCounter.js'),'utf8');
-vm.runInContext(src.replace('module.exports = {version: VERSION, run: async controller => { updateController = controller; await main(); }};', 'globalThis.WC = {parseAmount, monthKey, minor, materialize, summary, normalizeInput, capture, current, settingsSave, settingsRead, appendEvent, effectiveSettings, eventsRead, fxEstimate, fxRefresh, usableRate};'), context);
+vm.runInContext(src.replace('module.exports = {version: VERSION, run: async controller => { updateController = controller; await main(); }};', 'globalThis.WC = {parseAmount, monthKey, minor, materialize, summary, normalizeInput, capture, current, settingsSave, settingsRead, appendEvent, effectiveSettings, eventsRead, fxEstimate, fxRefresh, usableRate, slFare};'), context);
 const w = context.WC;
 async function run() {
   assert.equal(w.parseAmount('149,50'),149.5);
@@ -149,6 +149,66 @@ async function run() {
   await w.capture({...zero,action:'test'});
   assert.equal(w.eventsRead().length,beforeDiagnostic,'zero diagnostic does not create spending');
   assert.ok(notifications.length>0);
-  console.log('PASS: parsing, Stockholm month boundaries, test/live capture, duplicates, conversion, refunds, allowance history invalid input, FX inversion/rounding, EUR/GBP/USD, offline cache/expiry, malformed rates, manual FX corrections pinned estimates, zero transit taps, no guessed fare, manual correction/undo and unchanged strict validation.');
+  // SL is an explicit single-card approximation; no Wallet amount parsing or network.
+  clock='2026-12-15T10:00:00.000Z';
+  const preserved = new Map(files), requestsBeforeSL=requests;
+  const sl={action:'capture', merchant:' Sl ', amount:-1, currency:''};
+  await w.capture(sl);
+  let tickets=w.current().sum.tx.filter(t=>t.slFareMinor != null);
+  const first=tickets[0];
+  assert.equal(first.sekMinor,4300); assert.equal(first.slEstimated,true);
+  assert.equal(first.slTransferOf,null); assert.equal(w.current().sum.unresolved,0);
+  assert.equal(w.current().sum.spent,4300); assert.equal(w.current().sum.estimated,1);
+  clock='2026-12-15T10:40:00.000Z';
+  await w.capture({...sl,amount:43,currency:'SEK'});
+  assert.equal(w.current().sum.spent,4300);
+  let transfer=w.current().sum.tx.find(t=>t.slTransferOf);
+  assert.equal(transfer.slTransferOf,first.id); assert.equal(transfer.sekMinor,0);
+  assert.equal(transfer.duplicateOf,null);
+  clock='2026-12-15T11:14:59.999Z';
+  // Reload the engine against the same storage to simulate an app restart.
+  const restart=vm.createContext({...context});
+  vm.runInContext(src.replace('module.exports = {version: VERSION, run: async controller => { updateController = controller; await main(); }};', 'globalThis.WC = {capture, current};'),restart);
+  await restart.WC.capture({...sl,amount:{unreadable:true},currency:null});
+  assert.equal(restart.WC.current().sum.spent,4300,'transfers do not slide the window');
+  clock='2026-12-15T11:15:00.000Z';
+  await w.capture({...sl,amount:0});
+  assert.equal(w.current().sum.spent,8600,'exactly 75 minutes starts a new ticket');
+  const second=w.current().sum.tx.find(t=>t.slFareMinor && !t.slTransferOf && t.id!==first.id);
+  w.appendEvent({type:'conversion',target:second.id,sekMinor:2600,fxEstimated:false});
+  assert.equal(w.current().sum.tx.find(t=>t.id===second.id).slEstimated,false);
+  clock='2026-12-15T11:20:00.000Z';
+  await w.capture(sl);
+  assert.equal(w.current().sum.spent,6900,'correction preserves the ticket anchor');
+  w.appendEvent({type:'void',target:second.id});
+  clock='2026-12-15T11:21:00.000Z';
+  await w.capture(sl);
+  assert.equal(w.current().sum.spent,8600,'undone ticket cannot suppress a new fare');
+  const eventsBeforeTest=w.eventsRead().length;
+  await w.capture({...sl,action:'test'});
+  assert.equal(w.eventsRead().length,eventsBeforeTest,'SL diagnostics create no window or charge');
+  for(const merchant of ['Sl cafe','S.L.','SL transit'])
+    assert.throws(()=>w.normalizeInput({...sl,merchant}),'matching must be exact');
+  await w.capture({action:'capture',merchant:'Regular store',amount:19,currency:'SEK'});
+  assert.equal(w.current().sum.spent,10500,'normal purchases still count inside SL window');
+  w.settingsSave({...w.current().settings,slFareMinor:2600});
+  clock='2026-12-15T13:00:00.000Z';
+  await w.capture(sl);
+  assert.equal(w.current().sum.spent,13100,'edited fare applies only to new tickets');
+  clock='2026-12-31T22:30:00.000Z';
+  await w.capture(sl);
+  const decemberSpent=w.current().sum.spent;
+  clock='2026-12-31T23:00:00.000Z'; // Stockholm January 1, same ticket.
+  await w.capture(sl);
+  assert.equal(w.current().sum.spent,0,'month reset does not end the ticket');
+  assert.equal(w.current().sum.unresolved,0);
+  assert.equal(w.summary(w.eventsRead(),w.current().settings,'2026-12').spent,decemberSpent);
+  clock='2026-12-31T23:45:00.000Z';
+  await w.capture(sl);
+  assert.equal(w.current().sum.spent,2600);
+  assert.equal(requests,requestsBeforeSL,'SL never fetches FX');
+  for(const [p,bytes] of preserved) if(p.includes('/events/'))
+    assert.equal(files.get(p),bytes,'older event files remain byte-for-byte unchanged');
+  console.log('PASS: SL fixed window, exact boundary, restart, cross-month/year, transfer links, corrections/undo, edited fare, exact merchant match, ignored negative/missing SL values, no FX, preserved history;  parsing, Stockholm month boundaries, test/live capture, duplicates, conversion, refunds, allowance history invalid input, FX inversion/rounding, EUR/GBP/USD, offline cache/expiry, malformed rates, manual FX corrections pinned estimates, zero transit taps, no guessed fare, manual correction/undo and unchanged strict validation.');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});
