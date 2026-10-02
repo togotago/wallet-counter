@@ -137,7 +137,7 @@ async function run() {
   assert.throws(()=>w.normalizeInput({...zero,amount:null}));
   assert.throws(()=>w.normalizeInput({...zero,amount:NaN}));
   assert.throws(()=>w.normalizeInput({...zero,currency:''}));
-  assert.throws(()=>w.normalizeInput({...zero,merchant:''}));
+  assert.equal(w.normalizeInput({...zero,merchant:''}).merchant,'Unknown merchant');
   await w.capture({...zero,amount:'0,00',currency:'GBP',merchant:'Foreign transit'});
   assert.equal(requests,beforeTransitRequests,'zero foreign tap must not request rates');
   assert.equal(w.current().sum.spent,beforeTransit);
@@ -209,6 +209,34 @@ async function run() {
   assert.equal(requests,requestsBeforeSL,'SL never fetches FX');
   for(const [p,bytes] of preserved) if(p.includes('/events/'))
     assert.equal(files.get(p),bytes,'older event files remain byte-for-byte unchanged');
+  const beforeUnknown = w.current().sum.spent, beforeUnknownRequests = requests;
+  for(const merchant of [undefined, '', '  ', null, {}]) {
+    const input = w.normalizeInput({action:'capture', amount:45, currency:'SEK', merchant});
+    assert.equal(input.merchant,'Unknown merchant'); assert.equal(input.merchantUnavailable,true);
+    assert.equal(input.sl,false,'missing merchant must never imply SL');
+  }
+  await w.capture({action:'capture',amount:45,currency:'SEK',merchant:''});
+  const unknown = w.current().sum.tx.find(t=>t.merchantUnavailable);
+  assert.equal(unknown.sekMinor,4500); assert.equal(unknown.merchant,'Unknown merchant');
+  assert.equal(w.current().sum.spent,beforeUnknown+4500);
+  assert.ok(outputs.at(-1).includes('Wallet supplied no merchant name'));
+  await w.capture({action:'capture',amount:0,currency:'SEK'});
+  assert.equal(w.current().sum.spent,beforeUnknown+4500,'unnamed zero stays pending, no guessed fare');
+  assert.equal(requests,beforeUnknownRequests);
+  const beforeUnknownTest = w.eventsRead().length;
+  await w.capture({action:'test',amount:45,currency:'SEK'});
+  assert.equal(w.eventsRead().length,beforeUnknownTest);
+  assert.equal(w.normalizeInput({action:'capture',amount:45,currency:'SEK',merchant:' ',name:'Wallins'}).merchant,'Wallins');
+  assert.equal(w.normalizeInput({action:'capture',amount:-1,name:'Sl'}).sl,true);
+  for(const amount of [-1,null,NaN,{}]) assert.throws(()=>w.normalizeInput({action:'capture',amount,currency:'SEK'}));
+  assert.throws(()=>w.normalizeInput({action:'capture',amount:45,currency:''}));
+  fxRows=[{date:'2027-01-01',base:'SEK',quote:'EUR',rate:0.1}];
+  const beforeUnknownFX=w.current().sum.spent;
+  await w.capture({action:'capture',amount:5,currency:'EUR',merchant:' '});
+  const unknownFX=w.current().sum.tx.find(t=>t.merchantUnavailable && t.currency==='EUR');
+  assert.equal(unknownFX.sekMinor,5000);assert.equal(unknownFX.fxEstimated,true);
+  assert.equal(w.current().sum.spent,beforeUnknownFX+5000);
+  console.log('PASS: unnamed SEK/FX capture, Name fallback, unnamed zero pending, diagnostics without spending, no SL inference, invalid amount/currency still rejected.');
   console.log('PASS: SL fixed window, exact boundary, restart, cross-month/year, transfer links, corrections/undo, edited fare, exact merchant match, ignored negative/missing SL values, no FX, preserved history;  parsing, Stockholm month boundaries, test/live capture, duplicates, conversion, refunds, allowance history invalid input, FX inversion/rounding, EUR/GBP/USD, offline cache/expiry, malformed rates, manual FX corrections pinned estimates, zero transit taps, no guessed fare, manual correction/undo and unchanged strict validation.');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});
