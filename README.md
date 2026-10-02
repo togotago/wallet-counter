@@ -6,7 +6,7 @@ Apple Wallet → personal Shortcuts automation → Scriptable → local purchase
 
 ## Install once
 
-The current release is v0.3.3. The published manifest selects the tested release at an immutable commit.
+The current release is v0.3.4. The published manifest selects the tested release at an immutable commit.
 
 1. Keep a copy of your existing Wallet Counter script. You can also use Export backup for a readable record of your spending; automatic data import is not implemented.
 2. Replace the contents of the existing **Wallet Counter** Scriptable script with `Wallet-Counter-Launcher.js`. Keep the same script name.
@@ -30,6 +30,10 @@ The checksum detects incomplete or altered files. It is not a publisher signatur
 All purchases, merchant names, allowance settings and history stay in local Scriptable storage. Code hosting receives update requests, including normal network metadata such as the device's IP address. The exchange-rate service receives a public SEK rate request, not merchant names or purchase amounts.
 
 A private repository would need separate authenticated downloads and a narrowly scoped read-only token stored in Scriptable Keychain. This launcher deliberately uses public hosting and contains no token.
+
+## Missing merchant names
+
+v0.3.4 accepts purchases when Wallet supplies no merchant name. A valid amount and currency are still required; the purchase counts normally and is saved as `Unknown merchant` with `merchantUnavailable: true`. A `name` input is used when supplied and `merchant` is blank. Existing Shortcuts need no edits. Zero amounts stay pending, and negative/malformed amounts still fail. A missing name never activates the SL fare rule. Previously rejected taps were not saved; add them manually only after checking history to avoid counting twice.
 
 ## SL estimated fares
 
