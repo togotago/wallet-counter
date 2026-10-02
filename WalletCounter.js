@@ -2,7 +2,7 @@
 // Purchase data stays local. Only public ECB exchange rates are requested.
 // Shortcut input: {action: 'test'|'capture', amount: '149.50', currency: 'SEK', merchant: 'ICA'}
 
-const VERSION = '0.3.3';
+const VERSION = '0.3.4';
 let updateController = null;
 const ZONE = 'Europe/Stockholm';
 
@@ -60,14 +60,14 @@ function normalizeInput(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Pass a Dictionary with action, amount, currency and merchant.');
   const action = String(raw.action || '').toLowerCase();
   if (!['test', 'capture'].includes(action)) throw new Error('Set action to test or capture.');
-  const merchant = typeof raw.merchant === 'string' ? raw.merchant.trim().slice(0, 180) : '';
-  if (!merchant) throw new Error('Missing merchant. Pass Merchant or Name from the Wallet transaction.');
+  const merchantName = [raw.merchant, raw.name].find(v => typeof v === 'string' && v.trim());
+  const merchant = merchantName ? merchantName.trim().slice(0, 180) : 'Unknown merchant';
   // SL uses a configured fare, so its provisional Wallet amount is not parsed.
   const sl = merchant.toLowerCase() === 'sl';
   const amount = sl ? 0 : parseAmount(raw.amount, true);
   const currency = sl ? 'SEK' : String(raw.currency || '').trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error('Missing currency code. Pass Currency Code, for example SEK.');
-  return {action, amount, currency, merchant, sl, card: typeof raw.card === 'string' ? raw.card.slice(0, 100) : ''};
+  return {action, amount, currency, merchant, merchantUnavailable: !merchantName, sl, card: typeof raw.card === 'string' ? raw.card.slice(0, 100) : ''};
 }
 
 // One card/device: transfers never become anchors or extend the first tap's window.
@@ -235,7 +235,7 @@ async function capture(raw) {
   const amountUnavailable = !input.sl && input.amount === 0;
   const dup = input.sl ? null : duplicateOf(transactions, input, now);
   const saved = appendEvent({type: 'purchase', source: 'wallet', month: monthKey(now),
-    amount: transit ? transit.sekMinor / 100 : input.amount, currency: input.currency, merchant: input.merchant, card: input.card,
+    amount: transit ? transit.sekMinor / 100 : input.amount, currency: input.currency, merchant: input.merchant, merchantUnavailable: input.merchantUnavailable, card: input.card,
     sekMinor: !amountUnavailable && input.currency === 'SEK' ? minor(input.amount) : null,
     amountUnavailable, pendingReason: amountUnavailable ? 'wallet_zero_amount' : null,
     duplicateOf: dup ? dup.id : null, reviewed: false, allowanceAtCapture: state.sum.allowance,
@@ -254,6 +254,7 @@ async function capture(raw) {
   else if (amountUnavailable) text += ' Wallet supplied a zero amount. Tap saved for review; no spending deducted. Set the actual SEK charge in Recent purchases, or undo this tap if it did not create a separate charge.';
   else if (estimate) text += ' ' + input.amount + ' ' + input.currency + ' deducted as approximately ' + money(estimate.sekMinor) + ' (ECB ' + estimate.fx.rateDate + ').';
   else if (input.currency !== 'SEK') text += ' No usable rate: convert ' + input.amount + ' ' + input.currency + ' in Recent purchases; it is not yet deducted.';
+  if (input.merchantUnavailable) text += ' Wallet supplied no merchant name; saved as Unknown merchant.';
   if (dup) text += ' Possible duplicate: both purchases remain counted until reviewed.';
   if (state.settings.notifications || amountUnavailable || input.currency !== 'SEK' || dup) await notify(amountUnavailable ? 'Wallet tap needs review' : 'Wallet Counter', text);
   Script.setShortcutOutput(text);
