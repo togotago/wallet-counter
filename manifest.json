@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "launcher": 1,
-  "version": "0.3.3",
-  "ref": "d717602f610cc7678092294ead9b537df00b478e",
-  "path": "releases/WalletCounter-0.3.3.js",
-  "sha256": "fc7bb28027fbbb8a8f6e7115d5f159afa1e0c31ae3ab5dc24617e525df472c1a",
-  "notes": "Storage replacement repair. If updating fails with an existing-file error, first replace your Wallet Counter script with launcher v1.0.1 from the repo. Preserves SL 75-minute estimates, FX and existing history; repairs settings, FX-cache and diagnostic rewrites."
+  "version": "0.3.4",
+  "ref": "e7205ad399481f7ed482e7d9667da99960fbe139",
+  "path": "releases/WalletCounter-0.3.4.js",
+  "sha256": "a1f51353679672af4acc22cac628f319d8fd83a55532a2f46081140e5e491cf1",
+  "notes": "Missing Wallet merchant names no longer block valid purchases: saved as Unknown merchant. SL estimates, FX, resets and existing history retained. No Shortcut changes. Requires launcher v1.0.1 if the existing-file update error occurs."
 }
