@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "launcher": 1,
-  "version": "0.3.4",
-  "ref": "e7205ad399481f7ed482e7d9667da99960fbe139",
-  "path": "releases/WalletCounter-0.3.4.js",
-  "sha256": "a1f51353679672af4acc22cac628f319d8fd83a55532a2f46081140e5e491cf1",
-  "notes": "Missing Wallet merchant names no longer block valid purchases: saved as Unknown merchant. SL estimates, FX, resets and existing history retained. No Shortcut changes. Requires launcher v1.0.1 if the existing-file update error occurs."
+  "version": "0.3.5",
+  "ref": "218fc74e86a3abb08cba3dd82731da4c39ec9524",
+  "path": "releases/WalletCounter-0.3.5.js",
+  "sha256": "9138d20a393e6791af33483a23b335fdf18ffdc047faf2c84e51a0150058a67a",
+  "notes": "Adds a local rotating debug log for Wallet captures and failures. Open Wallet Counter → Debug log to view recent entries, share/copy the full log, or clear it. Logs include engine version and the raw Amount/Currency/Merchant/Name field types and values needed to diagnose Wallet/Shortcut issues; card value is not logged. Missing merchant handling, SL estimates, FX, resets, and history are unchanged. No Shortcut changes."
 }
