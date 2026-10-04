@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "launcher": 1,
-  "version": "0.3.5",
-  "ref": "218fc74e86a3abb08cba3dd82731da4c39ec9524",
-  "path": "releases/WalletCounter-0.3.5.js",
-  "sha256": "9138d20a393e6791af33483a23b335fdf18ffdc047faf2c84e51a0150058a67a",
-  "notes": "Adds a local rotating debug log for Wallet captures and failures. Open Wallet Counter → Debug log to view recent entries, share/copy the full log, or clear it. Logs include engine version and the raw Amount/Currency/Merchant/Name field types and values needed to diagnose Wallet/Shortcut issues; card value is not logged. Missing merchant handling, SL estimates, FX, resets, and history are unchanged. No Shortcut changes."
+  "version": "0.3.6",
+  "ref": "4940e51dd233551ea48556b37f19cb2a27a85fd2",
+  "path": "releases/WalletCounter-0.3.6.js",
+  "sha256": "0d5d11a7e6232928868ce7748c06c5362674d524fb98a86744b8d68bf694d9ca",
+  "notes": "Handles the iOS empty Wallet payload without failing the Shortcut. When amount is zero/missing and currency, merchant and name are all blank, Wallet Counter asks whether the tap was SL. Yes logs the existing SL fare/transfer logic at the original tap time; No changes nothing. Prompts expire after 24 hours, and out-of-order responses avoid double-counting. Partially populated malformed purchases still fail normally. No Shortcut changes."
 }
