@@ -94,8 +94,8 @@ Refunds can make the balance exceed the monthly allowance. Spending past the lim
 ## Limits and recovery
 
 - Supported iPhone Wallet taps are the initial scope. Online/app Apple Pay, physical-card payments, Apple Watch payments, recurring charges, invoices and historic Wallet transactions are not assumed to be captured. Device tests determine coverage.
-- Apple sometimes times out before supplying a Wallet transaction. A missed trigger cannot be detected by this script. Keep comparing captures with receipts during the trial.
-- Amount and currency must validate. Invalid input fails visibly when execution reaches Scriptable; it never becomes a zero-value purchase.
+- Apple sometimes runs the automation without supplying usable Wallet fields. When amount is zero/missing and currency, merchant and name are all blank, Wallet Counter asks whether the tap was SL and deducts nothing until you choose Yes. If the automation does not run at all, the script cannot detect the missed trigger. Keep comparing captures with receipts during the trial.
+- Outside that all-empty fallback, amount and currency must validate. Partially populated or malformed input still fails visibly; it is never guessed into an SL fare or zero-value purchase.
 - Two identical Wallet entries within 90 seconds are flagged but both remain counted. Review them to distinguish a retry from two genuine purchases.
 - Captures have separate local event files, so simultaneous captures do not overwrite one shared transaction list. Corrections retain an audit trail. Month reset is a calendar calculation, not a midnight background job.
 - Local storage has no iCloud sync or automatic cloud backup. Export periodically. Removing Scriptable can remove its data. Backup restore is not implemented in this first version; keep exports for recovery or future import.

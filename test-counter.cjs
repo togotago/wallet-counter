@@ -21,12 +21,17 @@ class MockRequest {
 }
 const context = vm.createContext({Date: Clock, Intl, console, FileManager: {local: () => fm},
   Request: MockRequest, UUID: {string: () => 'id-'+String(++seq).padStart(5,'0')},
-  Notification: class { async schedule() { notifications.push({title:this.title,body:this.body}); } },
+  Notification: class {
+    constructor() { this.actions=[]; }
+    addAction(title,url,destructive=false) { this.actions.push({title,url,destructive}); }
+    async schedule() { notifications.push({identifier:this.identifier,title:this.title,body:this.body,openURL:this.openURL,actions:this.actions}); }
+    static async removeDelivered() {}
+  },
   Script: {name: () => 'Wallet Counter', setShortcutOutput: s => outputs.push(s), complete() {}},
-  config: {runsInApp:false,runsInWidget:false}, args: {shortcutParameter:null}
+  config: {runsInApp:false,runsInWidget:false}, args: {shortcutParameter:null,queryParameters:{}}
 });
 const src = fs.readFileSync(path.join(__dirname,'WalletCounter.js'),'utf8');
-vm.runInContext(src.replace('module.exports = {version: VERSION, run: async controller => { updateController = controller; await main(); }};', 'globalThis.WC = {parseAmount, monthKey, minor, materialize, summary, normalizeInput, capture, current, settingsSave, settingsRead, appendEvent, effectiveSettings, eventsRead, fxEstimate, fxRefresh, usableRate, slFare};'), context);
+vm.runInContext(src.replace('module.exports = {version: VERSION, run: async controller => { updateController = controller; await main(); }};', 'globalThis.WC = {parseAmount, monthKey, minor, materialize, summary, normalizeInput, emptyWalletCapture, capture, handleSlPrompt, current, settingsSave, settingsRead, appendEvent, effectiveSettings, eventsRead, fxEstimate, fxRefresh, usableRate, slFare};'), context);
 const w = context.WC;
 async function run() {
   assert.equal(w.parseAmount('149,50'),149.5);
@@ -72,6 +77,24 @@ async function run() {
   const n=w.eventsRead().length;
   await assert.rejects(w.capture({action:'capture',amount:30,currency:'',merchant:'Bad input'}));
   assert.equal(w.eventsRead().length,n);
+  assert.equal(w.emptyWalletCapture({action:'capture',amount:0,currency:'',merchant:''}),true);
+  assert.equal(w.emptyWalletCapture({action:'capture',amount:'0,00',currency:'',name:' '}),true);
+  assert.equal(w.emptyWalletCapture({action:'capture',amount:30,currency:'',merchant:''}),false,'positive partial payload stays strict');
+  assert.equal(w.emptyWalletCapture({action:'test',amount:0,currency:'',merchant:''}),false,'diagnostics never become SL prompts');
+  const emptyBefore=w.eventsRead().length, emptySpent=w.current().sum.spent;
+  await w.capture({action:'capture',amount:0,currency:'',merchant:''});
+  const emptyPrompt=w.eventsRead().find(e=>e.type==='sl_prompt');
+  assert.ok(emptyPrompt,'empty Wallet capture creates a pending SL prompt');
+  assert.equal(w.eventsRead().length,emptyBefore+1);
+  assert.equal(w.current().sum.spent,emptySpent,'empty capture never changes spending before confirmation');
+  assert.equal(notifications.at(-1).title,'Was this an SL tap?');
+  assert.deepEqual(notifications.at(-1).actions.map(a=>a.title),['Yes, log SL','No']);
+  assert.ok(outputs.at(-1).includes('no spending deducted yet'));
+  await w.handleSlPrompt(emptyPrompt.id,'no');
+  assert.equal(w.current().sum.spent,emptySpent,'declining SL prompt keeps spending unchanged');
+  assert.ok(w.eventsRead().some(e=>e.type==='sl_prompt_response'&&e.target===emptyPrompt.id&&e.response==='no'));
+  await w.handleSlPrompt(emptyPrompt.id,'no');
+  assert.equal(w.current().sum.spent,emptySpent,'replaying a declined prompt is harmless');
   // Corrections in the same millisecond must apply after their purchase.
   const reconciled=w.materialize([{schema:1,type:'conversion',id:'a',createdAt:clock,target:'z',sekMinor:100},
     {schema:1,type:'purchase',id:'z',createdAt:clock,sekMinor:null}]);
@@ -236,6 +259,52 @@ async function run() {
   const unknownFX=w.current().sum.tx.find(t=>t.merchantUnavailable && t.currency==='EUR');
   assert.equal(unknownFX.sekMinor,5000);assert.equal(unknownFX.fxEstimated,true);
   assert.equal(w.current().sum.spent,beforeUnknownFX+5000);
+  // Completely empty Wallet payloads can be confirmed later as SL while keeping the original tap time.
+  w.settingsSave({...w.current().settings,slFareMinor:4300});
+  clock='2027-01-03T10:00:00.000Z';
+  const promptBase=w.current().sum.spent;
+  await w.capture({action:'capture',amount:0,currency:'',merchant:'',name:''});
+  const p1=w.eventsRead().filter(e=>e.type==='sl_prompt').at(-1);
+  clock='2027-01-03T10:10:00.000Z';
+  await w.handleSlPrompt(p1.id,'yes');
+  let promptTicket=w.current().sum.tx.find(x=>x.slPromptOf===p1.id);
+  assert.equal(promptTicket.createdAt,'2027-01-03T10:00:00.000Z','confirmed SL uses original Wallet tap time');
+  assert.equal(promptTicket.sekMinor,4300); assert.equal(w.current().sum.spent,promptBase+4300);
+  const afterFirstPrompt=w.current().sum.spent;
+  await w.handleSlPrompt(p1.id,'yes');
+  assert.equal(w.current().sum.spent,afterFirstPrompt,'replaying yes cannot double-log the same prompt');
+  clock='2027-01-03T10:40:00.000Z';
+  await w.capture({action:'capture',amount:'0,00',currency:'',merchant:''});
+  const p2=w.eventsRead().filter(e=>e.type==='sl_prompt').at(-1);
+  clock='2027-01-03T10:55:00.000Z';
+  await w.handleSlPrompt(p2.id,'yes');
+  const promptTransfer=w.current().sum.tx.find(x=>x.slPromptOf===p2.id);
+  assert.equal(promptTransfer.createdAt,'2027-01-03T10:40:00.000Z');
+  assert.equal(promptTransfer.sekMinor,0); assert.equal(promptTransfer.slTransferOf,promptTicket.id);
+  assert.equal(w.current().sum.spent,afterFirstPrompt,'late confirmation still uses the original 75-minute window');
+  clock='2027-01-04T10:00:00.000Z';
+  await w.capture({action:'capture',amount:0,currency:'',merchant:''});
+  const stale=w.eventsRead().filter(e=>e.type==='sl_prompt').at(-1);
+  clock='2027-01-05T10:00:01.000Z';
+  const beforeStale=w.current().sum.spent;
+  await w.handleSlPrompt(stale.id,'yes');
+  assert.equal(w.current().sum.spent,beforeStale,'prompts older than 24 hours cannot create a charge');
+  assert.ok(w.eventsRead().some(e=>e.type==='sl_prompt_response'&&e.target===stale.id&&e.response==='expired'));
+  clock='2027-01-06T10:00:00.000Z';
+  await w.capture({action:'capture',amount:0,currency:'',merchant:''});
+  const early=w.eventsRead().filter(e=>e.type==='sl_prompt').at(-1);
+  assert.equal(early.allowanceAtCapture,w.current().sum.allowance,'prompt snapshots the tap-month allowance');
+  clock='2027-01-06T10:40:00.000Z';
+  await w.capture({action:'capture',amount:0,currency:'',merchant:''});
+  const late=w.eventsRead().filter(e=>e.type==='sl_prompt').at(-1);
+  clock='2027-01-06T10:41:00.000Z';
+  await w.handleSlPrompt(late.id,'yes');
+  const afterLate=w.current().sum.spent;
+  clock='2027-01-06T10:42:00.000Z';
+  await w.handleSlPrompt(early.id,'yes');
+  assert.equal(w.current().sum.spent,afterLate,'older prompt cannot double-charge after a later SL ticket was already logged');
+  assert.ok(w.eventsRead().some(e=>e.type==='sl_prompt_response'&&e.target===early.id&&e.response==='conflict'));
+  console.log('PASS: empty Wallet fallback prompts for SL, no/yes handling, replay safety, original-tap 75-minute window, out-of-order conflict guard, and 24-hour expiry.');
   console.log('PASS: unnamed SEK/FX capture, Name fallback, unnamed zero pending, diagnostics without spending, no SL inference, invalid amount/currency still rejected.');
   console.log('PASS: SL fixed window, exact boundary, restart, cross-month/year, transfer links, corrections/undo, edited fare, exact merchant match, ignored negative/missing SL values, no FX, preserved history;  parsing, Stockholm month boundaries, test/live capture, duplicates, conversion, refunds, allowance history invalid input, FX inversion/rounding, EUR/GBP/USD, offline cache/expiry, malformed rates, manual FX corrections pinned estimates, zero transit taps, no guessed fare, manual correction/undo and unchanged strict validation.');
 }

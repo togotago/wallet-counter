@@ -21,7 +21,7 @@ const w=context.WC;
   const tx=w.current().sum.tx[0];
   assert.equal(tx.merchant,'Unknown merchant');assert.equal(tx.sekMinor,4500);
   let logs=w.debugLines().map(JSON.parse), last=logs.at(-1);
-  assert.equal(last.event,'capture_saved');assert.equal(last.version,'0.3.5');
+  assert.equal(last.event,'capture_saved');assert.equal(last.version,'0.3.6');
   assert.equal(last.input.amount.value,45);assert.equal(last.input.merchant.type,'undefined');
   assert.equal(last.normalized.merchant,'Unknown merchant');assert.equal(last.result.sekMinor,4500);
   const count=w.eventsRead().length;
